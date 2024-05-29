@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const stipe = require('stripe')(process.env.STRIPE_PAYMENT_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 3000;
 // middlewares
@@ -42,7 +43,9 @@ async function run() {
     const cartCollection = client
       .db('bistroBossRestaurantDB')
       .collection('carts');
-
+    const paymentCollection = client
+      .db('bistroBossRestaurantDB')
+      .collection('payments');
     // jwt related apis
     app.post('/jwt', (req, res) => {
       const user = req.body;
@@ -177,6 +180,31 @@ async function run() {
       const query = { _id: new ObjectId(id) };
       const result = await cartCollection.deleteOne(query);
       res.status(200).send(result);
+    });
+    // Payment Related Apis
+    app.post('/create-payment-intent', async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+      const paymentIntent = await stipe.paymentIntents.create({
+        amount: amount,
+        currency: 'usd',
+        payment_method_types: ['card'], // extra line
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+    });
+    app.post('/payments', async (req, res) => {
+      const payment = req.body;
+      const paymentResult = await paymentCollection.insertOne(payment);
+      console.log('payment info', payment);
+      const query = {
+        _id: {
+          $in: payment.cartIds.map((id) => new ObjectId(id)),
+        },
+      };
+      const deleteResult = await cartCollection.deleteMany(query);
+      res.send({ paymentResult, deleteResult });
     });
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!'
